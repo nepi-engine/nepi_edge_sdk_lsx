@@ -180,7 +180,7 @@ if __name__ == '__main__':
           rospy.set_param(namespace + lsx_node_name + '/addr_str', dev_addrs[i])
           time.sleep(2)
           # Pass the name as a regular cmd-line arg since we can't rosrun this new node as it is not currently installed in ROS path
-          node_run_cmd = ['rosrun', 'nepi_edge_sdk_sealite', 'sealite_lsx_driver_script.py', '__name:=' + lsx_node_name] 
+          node_run_cmd = ['rosrun', 'nepi_edge_sdk_lsx', 'sealite_lsx_driver_script.py', '__name:=' + lsx_node_name] 
           p = subprocess.Popen(node_run_cmd)
           active_port_list.append(dev_ports[i])
           active_node_list.append(lsx_node_name)
