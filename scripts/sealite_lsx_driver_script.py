@@ -58,7 +58,7 @@ class Sealite_Node(object):
   STANDBY = False
   INTENSITY = 0.0
   STROBE_ENABLE = False
-
+  
   #######################
   ### LXS Driver NODE Initialization
   def __init__(self,port_str,buad_int,addr_str):
@@ -68,7 +68,7 @@ class Sealite_Node(object):
     self.dev_addr_str = addr_str
     port_str = port.split("tty")[1]
     self.node_name = rospy.get_name().split('/')[-1]
-
+    
     self.standby = False
     self.intensity = 0.0
     self.strobe_enable = False
@@ -127,6 +127,7 @@ class Sealite_Node(object):
       # Start an LSX node activity check process that kills node after some number of failed comms attempts
       rospy.loginfo("Starting an activity check process")
       rospy.Timer(rospy.Duration(1), self.lsx_status_timer_callback)
+      rospy.Timer(rospy.Duration(.1), self.lsx_check_timer_callback)
       # Initialization Complete
       rospy.loginfo(self.node_name + ": Initialization Complete")
     else:
@@ -140,7 +141,10 @@ class Sealite_Node(object):
 
   ## Callback to regulary check device comms, track failures, and kill unresponsive device connections
   def lsx_status_timer_callback(self,timer):
-    # Create message string
+    #Update the status message
+    self.lsx_status_callback()
+    
+  def lsx_check_timer_callback(self,timer):
     success = False
     port_check = self.check_port(self.ser_port_str)
     if port_check is True:
@@ -166,7 +170,9 @@ class Sealite_Node(object):
       else:
         rospy.logwarn(self.node_name + ": serial port not defined or ROS shutdown")
     else:
-      rospy.loginfo(self.node_name + ": serial port not active")
+      rospy.logwarn(self.node_name + ": Shutting down device: " +  self.dev_addr_str + " on port " + self.ser_port_str)
+      #rospy.loginfo(self.node_name + ": serial port not found")
+      rospy.signal_shutdown("Too many comm failures")   
     # Update results and take actions
     if success:
       self.serial_busy = False # Clear the busy indicator
@@ -177,12 +183,10 @@ class Sealite_Node(object):
       self.check_count = self.check_count + 1 # increment counter
       self.lxs_active_pub.publish(data=False)
     #print("Current failed comms count: " + str(self.check_count))
-    if self.check_count > 0:  # Crashes node with anything greater than 0 on check?
+    if self.check_count > 0:  # Crashes node if set above 0??
       rospy.logwarn(self.node_name + ": Shutting down device: " +  self.dev_addr_str + " on port " + self.ser_port_str)
-      rospy.logwarn(self.node_name + ": To many comm failures")
-      rospy.signal_shutdown("To many comm failures")
-    #Update the status message
-    self.lsx_status_callback()
+      rospy.logwarn(self.node_name + ": Too many comm failures")
+      rospy.signal_shutdown("To many comm failures")   
    
   ### Function to try and connect to device at given port and buadrate
   def lsx_connect(self):
@@ -249,7 +253,7 @@ class Sealite_Node(object):
   def update_status_values(self):
     success = True
     # Update standby status
-    rospy.loginfo(self.node_name + ": Updating standby setting")
+    rospy.loginfo(self.node_name + ": Updating standby status")
     ser_msg= ('!' + self.dev_addr_str + ':STBY?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
@@ -263,7 +267,7 @@ class Sealite_Node(object):
     else:
       success = False
     # Update intensity status
-    rospy.loginfo(self.node_name + ": Updating intensity setting")
+    rospy.loginfo(self.node_name + ": Updating intensity status")
     ser_msg= ('!' + self.dev_addr_str + ':LOUT?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
@@ -279,7 +283,7 @@ class Sealite_Node(object):
       self.intensity = -999
       success = False
     # Update strobe enable status
-    rospy.loginfo(self.node_name + ": Updating strobe enable setting")
+    rospy.loginfo(self.node_name + ": Updating strobe enable status")
     ser_msg= ('!' + self.dev_addr_str + ':PMOD?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
@@ -293,7 +297,7 @@ class Sealite_Node(object):
     else:
       success = False
     # Update temp status
-    rospy.loginfo(self.node_name + ": Updating temp setting")
+    rospy.loginfo(self.node_name + ": Updating temp status")
     ser_msg= ('!' + self.dev_addr_str + ':TEMP?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":

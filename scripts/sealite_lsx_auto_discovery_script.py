@@ -39,7 +39,7 @@ import subprocess
 
 #Define Discovery Search Parameters
 BAUDRATE_LIST = [9600,19200,57600] # Three supported baud rates
-ADDRESS_LIST = list(range(1,255))  # Total range 1-255
+ADDRESS_LIST = list(range(1,10))  # Total range 1-255
 
 #########################################
 # Sealite Discover Method
