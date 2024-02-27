@@ -179,7 +179,6 @@ catkin_package(
 
 catkin_install_python(PROGRAMS
   scripts/sealite_lsx_driver_script.py
-  scripts/sealite_lsx_auto_discovery_script.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
