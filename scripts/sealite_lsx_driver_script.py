@@ -65,6 +65,10 @@ class Sealite_Node(object):
     self.connected = False  
     self.ser_port_str = port_str
     self.ser_buad_int = buad_int
+    # Address string must be three char long
+    zero_prefix_len = 3-len(addr_str)
+    for z in range(zero_prefix_len):
+      addr_str = ('0' + addr_str)
     self.dev_addr_str = addr_str
     port_str = port.split("tty")[1]
     self.node_name = rospy.get_name().split('/')[-1]
