@@ -58,6 +58,7 @@ class Sealite_Node(object):
   STANDBY = False
   INTENSITY = 0.0
   STROBE_ENABLE = False
+  SELF_CHECK_COUNT = 5
   
   #######################
   ### LXS Driver NODE Initialization
@@ -84,7 +85,6 @@ class Sealite_Node(object):
     NEPI_LSX_BASENAME = rospy.get_namespace() + self.node_name  + "/lsx/"
     NEPI_LSX_CAPABILITY_REPORT_SERVICE = NEPI_LSX_BASENAME + "capabilities_query"
     NEPI_LSX_STATUS_TOPIC = NEPI_LSX_BASENAME + "status"
-    NEPI_LSX_ACTIVE_TOPIC = NEPI_LSX_BASENAME + "active" # Use to check for node shutdown
     NEPI_LSX_SET_STANDBY_TOPIC = NEPI_LSX_BASENAME + "set_standby"
     NEPI_LSX_SET_INTENSITY_TOPIC = NEPI_LSX_BASENAME + "set_intensity"
     NEPI_LSX_SET_STROBE_ENABLE_TOPIC = NEPI_LSX_BASENAME + "set_strobe_enable"
@@ -93,7 +93,6 @@ class Sealite_Node(object):
     self.serial_busy = False
     self.lxs_capabilities_report = LSXCapabilitiesQueryResponse()
     self.lxs_status_pub = rospy.Publisher(NEPI_LSX_STATUS_TOPIC, LSXStatus, queue_size=1, latch=True)
-    self.lxs_active_pub = rospy.Publisher(NEPI_LSX_ACTIVE_TOPIC, Bool, queue_size=1, latch=False)     
     # Initialize some parameters
     self.serial_port = None
     self.serial_num = ""
@@ -131,7 +130,7 @@ class Sealite_Node(object):
       # Start an LSX node activity check process that kills node after some number of failed comms attempts
       rospy.loginfo("Starting an activity check process")
       rospy.Timer(rospy.Duration(1), self.lsx_status_timer_callback)
-      rospy.Timer(rospy.Duration(.1), self.lsx_check_timer_callback)
+      rospy.Timer(rospy.Duration(0.2), self.lsx_check_timer_callback)
       # Initialization Complete
       rospy.loginfo(self.node_name + ": Initialization Complete")
     else:
@@ -150,44 +149,38 @@ class Sealite_Node(object):
     
   def lsx_check_timer_callback(self,timer):
     success = False
-    port_check = self.check_port(self.ser_port_str)
-    if port_check is True:
-      if self.serial_port is not None and not rospy.is_shutdown():
-        ser_msg= ('!' + self.dev_addr_str + ':INFO?')
-        ser_str = (ser_msg + '\r\n')
-        b=bytearray()
-        b.extend(map(ord, ser_str))
-        try:
-          while self.serial_busy == True and not rospy.is_shutdown():
-            time.sleep(0.01) # Wait for serial port to be available
-          self.serial_busy = True
-          self.serial_port.write(b)
-          time.sleep(.01)
-          bs = self.serial_port.readline()
-          self.serial_busy = False
-          response = bs.decode()
-          # Check for valid response 
-          if response != None and response != "?" and response[3] == ",":
-            success = True
-        except Exception as e:
-          rospy.logwarn(self.node_name + ": Failed to send or recieve message")
-      else:
-        rospy.logwarn(self.node_name + ": serial port not defined or ROS shutdown")
-    else:
-      rospy.logwarn(self.node_name + ": Shutting down device: " +  self.dev_addr_str + " on port " + self.ser_port_str)
-      #rospy.loginfo(self.node_name + ": serial port not found")
-      rospy.signal_shutdown("Too many comm failures")   
+    ser_msg= ('!' + self.dev_addr_str + ':INFO?')
+    ser_str = (ser_msg + '\r\n')
+    b=bytearray()
+    b.extend(map(ord, ser_str))
+    try:
+      while self.serial_busy == True and not rospy.is_shutdown():
+        time.sleep(0.01) # Wait for serial port to be available
+      self.serial_busy = True
+      self.serial_port.write(b)
+    except Exception as e:
+      rospy.logwarn(self.node_name + ": Failed to send message")
+    time.sleep(.01)
+    try:
+      bs = self.serial_port.readline()
+    except Exception as e:
+      rospy.logwarn(self.node_name + ": Failed to receive message")
+    self.serial_busy = False
+    response = bs.decode()
+    # Check for valid response 
+    if response != None and response != "?" and len(response)>4:
+      ret_addr = response[0:3]
+      if ret_addr == self.dev_addr_str:
+        success = True
     # Update results and take actions
     if success:
       self.serial_busy = False # Clear the busy indicator
       self.check_count = 0 # reset comms failure count
-      self.lxs_active_pub.publish(data=True)
     else:
       self.serial_busy = True # Lock port until valid response
       self.check_count = self.check_count + 1 # increment counter
-      self.lxs_active_pub.publish(data=False)
     #print("Current failed comms count: " + str(self.check_count))
-    if self.check_count > 0:  # Crashes node if set above 0??
+    if self.check_count > self.SELF_CHECK_COUNT:  # Crashes node if set above limit??
       rospy.logwarn(self.node_name + ": Shutting down device: " +  self.dev_addr_str + " on port " + self.ser_port_str)
       rospy.logwarn(self.node_name + ": Too many comm failures")
       rospy.signal_shutdown("To many comm failures")   
@@ -205,26 +198,29 @@ class Sealite_Node(object):
         # Send Message
         rospy.loginfo(self.node_name + ": Requesting info for device: " + self.dev_addr_str)
         ser_msg = ('!' + self.dev_addr_str + ':INFO?')
-        rospy.loginfo(self.node_name + ": Sending serial string: " + ser_msg)
+        #rospy.loginfo(self.node_name + ": Sending serial string: " + ser_msg)
         response = self.send_msg(ser_msg)
-        if response != None and response != "?" and response[3] == ",":
-          if len(response) > 2:
-            ret_addr = response[0:3]
-            rospy.loginfo(self.node_name + ": Returned address value: " + ret_addr)
-            if ret_addr == self.dev_addr_str:
-              rospy.loginfo(self.node_name + ": Connected to device at address: " +  self.dev_addr_str)
-              res_split = response.split(',')
-              if len(res_split) > 4:
-              # Update serial, hardware, and software status values
-                self.serial_num = res_split[2]
-                self.hw_version = res_split[3]
-                self.sw_version = res_split[4]
-              success = True
-              self.lxs_active_pub.publish(data=True)
+        #rospy.loginfo("Got response message: " + response)
+        if len(response) > 0:
+          if response != None and response != "?" and response[3] == ",":
+            if len(response) > 4:
+              ret_addr = response[0:3]
+              #rospy.loginfo(self.node_name + ": Returned address value: " + ret_addr)
+              if ret_addr == self.dev_addr_str:
+                rospy.loginfo(self.node_name + ": Connected to device at address: " +  self.dev_addr_str)
+                res_split = response.split(',')
+                if len(res_split) > 5:
+                # Update serial, hardware, and software status values
+                  self.serial_num = res_split[2]
+                  self.hw_version = res_split[3]
+                  self.sw_version = res_split[4]
+                success = True
+              else:
+                rospy.logwarn(self.node_name + ": Device returned address: " + ret_addr + " does not match: " +  self.dev_addr_str)
             else:
-              rospy.logwarn(self.node_name + ": Device returned address: " + ret_addr + " does not match: " +  self.dev_addr_str)
+              rospy.logwarn(self.node_name + ": Device returned invalid response")
           else:
-            rospy.logwarn(self.node_name + ": Device returned invalid response")
+            rospy.logwarn(self.node_name + ": Device returned empty response")
         else:
           rospy.logwarn(self.node_name + ": Device returned invalid response")
       except Exception as e:
@@ -257,7 +253,7 @@ class Sealite_Node(object):
   def update_status_values(self):
     success = True
     # Update standby status
-    rospy.loginfo(self.node_name + ": Updating standby status")
+    #rospy.loginfo(self.node_name + ": Updating standby status")
     ser_msg= ('!' + self.dev_addr_str + ':STBY?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
@@ -267,27 +263,27 @@ class Sealite_Node(object):
         self.standby = True
       else:
         success = False
-      rospy.loginfo(self.node_name + ": Standby: " + str(self.standby))
+      #rospy.loginfo(self.node_name + ": Standby: " + str(self.standby))
     else:
       success = False
     # Update intensity status
-    rospy.loginfo(self.node_name + ": Updating intensity status")
+    #rospy.loginfo(self.node_name + ": Updating intensity status")
     ser_msg= ('!' + self.dev_addr_str + ':LOUT?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
       try:
         self.intensity = float(response)/100
-        rospy.loginfo(self.node_name + ": Intensity Ratio: " + str(self.intensity))
+        #rospy.loginfo(self.node_name + ": Intensity Ratio: " + str(self.intensity))
       except Exception as i:
         self.intensity = -999
         rospy.logwarn(self.node_name + ": Level response was not valid number")
         success = False
-      rospy.loginfo(self.node_name + ": Intensity: " + str(self.intensity))
+      #rospy.loginfo(self.node_name + ": Intensity: " + str(self.intensity))
     else:
       self.intensity = -999
       success = False
     # Update strobe enable status
-    rospy.loginfo(self.node_name + ": Updating strobe enable status")
+    #rospy.loginfo(self.node_name + ": Updating strobe enable status")
     ser_msg= ('!' + self.dev_addr_str + ':PMOD?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
@@ -297,22 +293,22 @@ class Sealite_Node(object):
        self.strobe_enable = True
       else:
         success = False
-      rospy.loginfo(self.node_name + ": Strobe Enable: " + str(self.strobe_enable))
+      #rospy.loginfo(self.node_name + ": Strobe Enable: " + str(self.strobe_enable))
     else:
       success = False
     # Update temp status
-    rospy.loginfo(self.node_name + ": Updating temp status")
+    #rospy.loginfo(self.node_name + ": Updating temp status")
     ser_msg= ('!' + self.dev_addr_str + ':TEMP?')
     response = self.send_msg(ser_msg)
     if response != None and response != "?":
       try:
         self.temp_c = int(float(response))
-        rospy.loginfo(self.node_name + ": Temp Deg C: " + str(self.temp_c))
+        #rospy.loginfo(self.node_name + ": Temp Deg C: " + str(self.temp_c))
       except Exception as t:
         self.temp_c = 255
         rospy.logwarn(self.node_name + ": Temp response was not valid number")
         success = False
-      rospy.loginfo(self.node_name + ": Temp C: " + str(self.temp_c))
+      #rospy.loginfo(self.node_name + ": Temp C: " + str(self.temp_c))
     else:
       self.temp_c = 255
       success = False
